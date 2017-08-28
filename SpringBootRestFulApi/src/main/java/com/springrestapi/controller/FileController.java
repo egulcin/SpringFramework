@@ -12,14 +12,13 @@ import java.sql.SQLException;
 import java.util.Date;
 import java.util.List;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
@@ -33,9 +32,6 @@ import com.springrestapi.util.FileUploadUtil;
 
 @RestController
 public class FileController {
-
-	private static final Logger LOGGER = LoggerFactory
-			.getLogger(FileController.class);
 
 	@Autowired
 	private FileRepository repo;
@@ -62,15 +58,14 @@ public class FileController {
 	 *
 	 * @param id
 	 * @return
-	 * @throws IOException
 	 */
 	@RequestMapping(value = "/filemetadata/{id}", method = RequestMethod.GET)
-	public FileMetaData getFileMetaData(@PathVariable Integer id) {
+	public ResponseEntity<?> getFileMetaData(@PathVariable Integer id) {
 		FileMetaData fileMetaData = repo.findOne(id);
 
 		if (fileMetaData != null) {
-			Path path = Paths.get(fileMetaData.getPath());
 			try {
+				Path path = Paths.get(fileMetaData.getPath());
 				BasicFileAttributes attr = Files.readAttributes(path,
 						BasicFileAttributes.class);
 				if (attr != null) {
@@ -92,14 +87,26 @@ public class FileController {
 					fileMetaData.setSymbolicLink(attr.isSymbolicLink());
 					fileMetaData.setSize(attr.size());
 					repo.saveAndFlush(fileMetaData);
+
+					return new ResponseEntity<FileMetaData>(fileMetaData,
+							HttpStatus.OK);
 				}
 
 			} catch (IOException e) {
-				e.printStackTrace();
+				return new ResponseEntity<Object>(
+						"IOException: Get file meta-data process has failed.",
+						HttpStatus.BAD_REQUEST);
+			}
+
+			catch (Exception e) {
+				return new ResponseEntity<Object>(
+						"Exception: Request has failed.",
+						HttpStatus.BAD_REQUEST);
 			}
 		}
 
-		return fileMetaData;
+		return new ResponseEntity<Object>("No FileMetaData found with id: "
+				+ id, HttpStatus.BAD_REQUEST);
 	}
 
 	/**
@@ -135,6 +142,18 @@ public class FileController {
 			/**
 			 * Write file content onto the disk
 			 */
+
+			String fileName = fileUploadUtil.assignFileName(name,
+					file.getOriginalFilename());
+			if (!StringUtils.isEmpty(fileName)) {
+				List<FileMetaData> metaDataList = repo.findByName(name);
+				if (metaDataList != null && metaDataList.size() > 0) {
+					return new ResponseEntity<Object>(
+							"Duplicate file name - FileMetaData found for the given name: "
+									+ name, HttpStatus.BAD_REQUEST);
+				}
+			}
+
 			String fullFilePath = fileUploadUtil.saveFileToDisk(file, name,
 					saveToPath);
 
@@ -164,6 +183,12 @@ public class FileController {
 					HttpStatus.BAD_REQUEST);
 		}
 
+		catch (Exception e) {
+			return new ResponseEntity<Object>(
+					"Exception: File upload process has failed.",
+					HttpStatus.BAD_REQUEST);
+		}
+
 		return new ResponseEntity<Object>("File successfully uploaded.",
 				new HttpHeaders(), HttpStatus.OK);
 	}
@@ -179,46 +204,58 @@ public class FileController {
 	 *            database. From there, we will get the path to the file and
 	 *            download it.
 	 * @return
-	 * @throws IOException
 	 */
 	@RequestMapping(value = "/downloadfile/{id}", method = RequestMethod.GET, produces = {
 			"text/plain", "application/pdf", "image/jpeg", "image/png" })
-	public ResponseEntity<?> downloadFile(@PathVariable("id") Integer id)
-			throws IOException {
+	public ResponseEntity<?> downloadFile(@PathVariable("id") Integer id) {
 		/**
 		 * Get file meta-data from the database using the 'id'
 		 */
 		FileMetaData fileMetaData = repo.findOne(id);
 		if (fileMetaData != null) {
-			/**
-			 * Create a File object.
-			 */
-			File file = new File(fileMetaData.getPath());
+			try {
+				/**
+				 * Create a File object.
+				 */
+				File file = new File(fileMetaData.getPath());
 
-			HttpHeaders headers = new HttpHeaders();
-			/**
-			 * We keep the content types of the uploaded files in our database
-			 * to be able to use them in download process.
-			 */
-			headers.setContentType(MediaType.parseMediaType(fileMetaData
-					.getContentType()));
-			headers.add("Access-Control-Allow-Origin", "*");
-			headers.add("Access-Control-Allow-Methods", "GET, POST, PUT");
-			headers.add("Access-Control-Allow-Headers", "Content-Type");
-			/**
-			 * file.getName() will give us the name of the file with its
-			 * extension Example: file_name.txt or file_name.docx
-			 */
-			headers.add("Content-Disposition", "filename=" + file.getName());
-			headers.add("Cache-Control", "no-cache, no-store, must-revalidate");
-			headers.add("Pragma", "no-cache");
-			headers.add("Expires", "0");
+				HttpHeaders headers = new HttpHeaders();
+				/**
+				 * We keep the content types of the uploaded files in our
+				 * database to be able to use them in download process.
+				 */
+				headers.setContentType(MediaType.parseMediaType(fileMetaData
+						.getContentType()));
+				headers.add("Access-Control-Allow-Origin", "*");
+				headers.add("Access-Control-Allow-Methods", "GET, POST, PUT");
+				headers.add("Access-Control-Allow-Headers", "Content-Type");
+				/**
+				 * file.getName() will give us the name of the file with its
+				 * extension Example: file_name.txt or file_name.docx
+				 */
+				headers.add("Content-Disposition", "filename=" + file.getName());
+				headers.add("Cache-Control",
+						"no-cache, no-store, must-revalidate");
+				headers.add("Pragma", "no-cache");
+				headers.add("Expires", "0");
 
-			headers.setContentLength(file.length());
-			ResponseEntity<InputStreamResource> response = new ResponseEntity<InputStreamResource>(
-					new InputStreamResource(new FileInputStream(file)),
-					headers, HttpStatus.OK);
-			return response;
+				headers.setContentLength(file.length());
+				ResponseEntity<InputStreamResource> response = new ResponseEntity<InputStreamResource>(
+						new InputStreamResource(new FileInputStream(file)),
+						headers, HttpStatus.OK);
+				return response;
+			} catch (IOException e) {
+				return new ResponseEntity<Object>(
+						"IOException: File not found with path: "
+								+ fileMetaData.getPath(),
+						HttpStatus.BAD_REQUEST);
+			}
+
+			catch (Exception e) {
+				return new ResponseEntity<Object>(
+						"Exception: Download file process has failed",
+						HttpStatus.BAD_REQUEST);
+			}
 		}
 		return new ResponseEntity<Object>("File not found with id: " + id,
 				HttpStatus.BAD_REQUEST);

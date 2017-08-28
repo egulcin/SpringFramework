@@ -27,7 +27,7 @@ public class FileUploadUtil {
 	/**
 	 * Uploaded file will be saved in this folder
 	 */
-	private static String DEFAULT_UPLOADED_FOLDER = "C://Users//oymakeg//Desktop//Upload//";
+	private static String DEFAULT_UPLOADED_FOLDER = "C://Upload//";
 
 	/**
 	 * This method saves the file content to the disk.
